@@ -15,6 +15,7 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN")
 CONFESS_CHANNEL_ID = 1392370500914774136
 MOD_ROLE_ID = 1389121338123485224
+TEST_SERVER_ID = 1389063140989337630  # Instant sync only in this server
 DATA_FILE = "/data/garden_data.json"
 
 # ====== BOT SETUP ======
@@ -72,8 +73,11 @@ def can_use(user_id, command, cooldown):
 # ====== EVENTS ======
 @bot.event
 async def on_ready():
-    await tree.sync()  # Force instant slash command sync
-    print(f"✅ Logged in as {bot.user} and synced commands.")
+    try:
+        synced = await tree.sync(guild=discord.Object(id=TEST_SERVER_ID))
+        print(f"✅ Synced {len(synced)} commands instantly to server {TEST_SERVER_ID}!")
+    except Exception as e:
+        print(f"❌ Sync error: {e}")
 
 # ====== ECONOMY COMMANDS ======
 @tree.command(name="balance", description="Check your coin balance")
@@ -145,52 +149,6 @@ async def removecoins(interaction: discord.Interaction, member: discord.Member, 
     current = get_balance(member.id)
     set_balance(member.id, max(0, current - amount))
     await interaction.response.send_message(f"✅ Removed **{amount} coins** from {member.mention}.")
-
-# ====== GARDEN COMMANDS ======
-plants = ["🌻 Sunflower", "🥕 Carrot", "🍓 Strawberry", "🌾 Wheat", "🌹 Rose"]
-
-@tree.command(name="plant", description="Plant a random seed in your garden")
-async def plant(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    cost = 10
-    balance = get_balance(user_id)
-    if balance < cost:
-        await interaction.response.send_message("❌ Not enough coins. Planting costs 10 coins.")
-        return
-    plant_choice = random.choice(plants)
-    set_balance(user_id, balance - cost)
-    add_plant(user_id, plant_choice)
-    await interaction.response.send_message(f"🌱 You planted a {plant_choice}!")
-
-@tree.command(name="harvest", description="Harvest all plants for coins")
-async def harvest(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    garden = get_garden(user_id)
-    if not garden:
-        await interaction.response.send_message("❌ You don’t have any plants to harvest.")
-        return
-    total_reward = 0
-    message = "🌾 You harvested:\n"
-    for plant, count in garden.items():
-        reward = random.randint(5, 15) * count
-        total_reward += reward
-        message += f"• {plant} x{count} → 💰 {reward} coins\n"
-    set_balance(user_id, get_balance(user_id) + total_reward)
-    clear_garden(user_id)
-    message += f"\nTotal earned: **{total_reward} coins** 💸"
-    await interaction.response.send_message(message)
-
-@tree.command(name="inventory", description="View your garden inventory")
-async def inventory(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    garden = get_garden(user_id)
-    if not garden:
-        await interaction.response.send_message("🌱 Your garden is empty. Use `/plant` to grow something!")
-        return
-    message = "🌿 **Your Garden:**\n"
-    for plant, count in garden.items():
-        message += f"• {plant} x{count}\n"
-    await interaction.response.send_message(message)
 
 # ====== FLASK KEEPALIVE ======
 app = Flask('')
