@@ -11,13 +11,12 @@ from threading import Thread
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
-# Load environment variables
+# ====== CONFIG ======
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
-REPL_URL = os.getenv("REPL_URL")
 CONFESS_CHANNEL_ID = 1392370500914774136
 MOD_ROLE_ID = 1389121338123485224
-BALANCES_FILE = "balances.json"
+BALANCES_FILE = "/data/balances.json"  # Persistent file for Render
 
 # ====== BOT SETUP ======
 intents = discord.Intents.default()
@@ -27,7 +26,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# ====== BALANCE SYSTEM ======
+# ====== PERSISTENT ECONOMY ======
 def load_balances():
     if os.path.exists(BALANCES_FILE):
         with open(BALANCES_FILE, "r") as f:
@@ -52,7 +51,7 @@ def set_balance(user_id, amount):
 async def on_ready():
     await tree.sync()
     print(f"✅ Logged in as {bot.user}")
-    print("🌱 The Garden Bot is ready!")
+    print("🌱 The Garden Bot is live!")
 
 # ====== ECONOMY COMMANDS ======
 @tree.command(name="balance", description="Check your coin balance")
@@ -151,22 +150,24 @@ user_word_cooldowns = {}
 
 @bot.event
 async def on_message(message):
-    if message.author.bot or message.guild is None:
+    if message.author.bot or not message.guild:
         return
 
     user_id = str(message.author.id)
     now = time.time()
 
-    if user_id not in user_word_cooldowns or now - user_word_cooldowns[user_id] > 10:
+    # Cooldown: 5 seconds
+    if user_id not in user_word_cooldowns or now - user_word_cooldowns[user_id] > 5:
         word_count = len(message.content.split())
         coins_earned = min(word_count, 10)  # Max 10 coins per message
         if coins_earned > 0:
             set_balance(message.author.id, get_balance(message.author.id) + coins_earned)
+            print(f"+{coins_earned} coins for {message.author.name}")
         user_word_cooldowns[user_id] = now
 
     await bot.process_commands(message)
 
-# ====== KEEP ALIVE ======
+# ====== FLASK KEEPALIVE ======
 app = Flask('')
 
 @app.route('/')
@@ -181,18 +182,6 @@ def keep_alive():
     t.start()
 
 keep_alive()
-
-# ====== SELF-PING ======
-def self_ping():
-    while True:
-        try:
-            requests.get(REPL_URL)
-            print("🔄 Self-ping successful.")
-        except Exception as e:
-            print("❌ Self-ping failed:", e)
-        time.sleep(280)  # Every 4.5 minutes
-
-Thread(target=self_ping).start()
 
 # ====== START BOT ======
 bot.run(TOKEN)
