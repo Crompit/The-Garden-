@@ -18,9 +18,6 @@ intents.guilds = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# REMOVE default help command
-bot.remove_command('help')
-
 # ====== LOAD/SAVE DATA ======
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -55,87 +52,84 @@ def can_use(user_id, command, cooldown):
 # ====== EVENTS ======
 @bot.event
 async def on_ready():
-    print(f"✅ {bot.user} is online!")
+    synced = await bot.tree.sync()
+    print(f"✅ Synced {len(synced)} slash commands")
+    print(f"🌱 {bot.user} is online and ready!")
 
-# ====== ECONOMY COMMANDS ======
-@bot.command()
-async def balance(ctx):
-    bal = get_balance(ctx.author.id)
-    await ctx.send(f"💰 {ctx.author.mention}, you have **{bal} coins**.")
+# ====== SLASH COMMANDS ======
+@bot.tree.command(name="help", description="Show all The Garden Bot commands")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🌿 The Garden Bot Help",
+        description="Here’s what I can do:",
+        color=discord.Color.green()
+    )
+    embed.add_field(
+        name="🌱 Economy Commands",
+        value="`/balance`, `/daily`, `/work`, `/beg`",
+        inline=False
+    )
+    embed.add_field(
+        name="👮‍♂️ Mod Commands",
+        value="`/addcoins <user> <amount>`, `/removecoins <user> <amount>` (mods only)",
+        inline=False
+    )
+    embed.set_footer(text="More commands coming soon 🌸")
+    await interaction.response.send_message(embed=embed)
 
-@bot.command()
-async def daily(ctx):
-    can_claim, wait = can_use(ctx.author.id, "daily", 86400)
+@bot.tree.command(name="balance", description="Check your coin balance")
+async def balance(interaction: discord.Interaction):
+    bal = get_balance(interaction.user.id)
+    await interaction.response.send_message(f"💰 {interaction.user.mention}, you have **{bal} coins**.")
+
+@bot.tree.command(name="daily", description="Claim your daily reward")
+async def daily(interaction: discord.Interaction):
+    can_claim, wait = can_use(interaction.user.id, "daily", 86400)
     if not can_claim:
-        await ctx.send(f"⏳ You can claim again in {wait // 60}m {wait % 60}s.")
+        await interaction.response.send_message(f"⏳ You can claim again in {wait // 60}m {wait % 60}s.", ephemeral=True)
         return
     reward = random.randint(50, 150)
-    set_balance(ctx.author.id, get_balance(ctx.author.id) + reward)
-    await ctx.send(f"🎁 {ctx.author.mention}, you claimed **{reward} coins**!")
+    set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
+    await interaction.response.send_message(f"🎁 {interaction.user.mention}, you claimed **{reward} coins**!")
 
-@bot.command()
-async def work(ctx):
-    can_work, wait = can_use(ctx.author.id, "work", 3600)
+@bot.tree.command(name="work", description="Work for some coins (1h cooldown)")
+async def work(interaction: discord.Interaction):
+    can_work, wait = can_use(interaction.user.id, "work", 3600)
     if not can_work:
-        await ctx.send(f"⏳ You can work again in {wait // 60}m {wait % 60}s.")
+        await interaction.response.send_message(f"⏳ You can work again in {wait // 60}m {wait % 60}s.", ephemeral=True)
         return
     jobs = ["Gardener", "Farmer", "Botanist", "Market Seller"]
     job = random.choice(jobs)
     pay = random.randint(30, 100)
-    set_balance(ctx.author.id, get_balance(ctx.author.id) + pay)
-    await ctx.send(f"👨‍🌾 {ctx.author.mention}, you worked as a **{job}** and earned **{pay} coins**!")
+    set_balance(interaction.user.id, get_balance(interaction.user.id) + pay)
+    await interaction.response.send_message(f"👨‍🌾 {interaction.user.mention}, you worked as a **{job}** and earned **{pay} coins**!")
 
-@bot.command()
-async def beg(ctx):
-    can_beg, wait = can_use(ctx.author.id, "beg", 300)
+@bot.tree.command(name="beg", description="Beg for a few coins (5m cooldown)")
+async def beg(interaction: discord.Interaction):
+    can_beg, wait = can_use(interaction.user.id, "beg", 300)
     if not can_beg:
-        await ctx.send(f"⏳ You can beg again in {wait}s.")
+        await interaction.response.send_message(f"⏳ You can beg again in {wait}s.", ephemeral=True)
         return
     reward = random.randint(5, 30)
-    set_balance(ctx.author.id, get_balance(ctx.author.id) + reward)
-    await ctx.send(f"🙏 {ctx.author.mention}, someone gave you **{reward} coins**!")
+    set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
+    await interaction.response.send_message(f"🙏 {interaction.user.mention}, someone gave you **{reward} coins**!")
 
-@bot.command()
-async def addcoins(ctx, member: discord.Member, amount: int):
-    if MOD_ROLE_ID not in [role.id for role in ctx.author.roles]:
-        await ctx.send("❌ You don’t have permission.")
+@bot.tree.command(name="addcoins", description="(Mods only) Add coins to a user")
+async def addcoins(interaction: discord.Interaction, user: discord.User, amount: int):
+    if MOD_ROLE_ID not in [role.id for role in interaction.user.roles]:
+        await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
         return
-    set_balance(member.id, get_balance(member.id) + amount)
-    await ctx.send(f"✅ Added **{amount} coins** to {member.mention}.")
+    set_balance(user.id, get_balance(user.id) + amount)
+    await interaction.response.send_message(f"✅ Added **{amount} coins** to {user.mention}.")
 
-@bot.command()
-async def removecoins(ctx, member: discord.Member, amount: int):
-    if MOD_ROLE_ID not in [role.id for role in ctx.author.roles]:
-        await ctx.send("❌ You don’t have permission.")
+@bot.tree.command(name="removecoins", description="(Mods only) Remove coins from a user")
+async def removecoins(interaction: discord.Interaction, user: discord.User, amount: int):
+    if MOD_ROLE_ID not in [role.id for role in interaction.user.roles]:
+        await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
         return
-    current = get_balance(member.id)
-    set_balance(member.id, max(0, current - amount))
-    await ctx.send(f"✅ Removed **{amount} coins** from {member.mention}.")
-
-# ====== HELP COMMAND ======
-@bot.command()
-async def help(ctx):
-    embed = discord.Embed(
-        title="🌿 The Garden Bot Help",
-        description="Here’s all my commands grouped by category:",
-        color=discord.Color.green()
-    )
-
-    embed.add_field(
-        name="🌱 Economy Commands",
-        value="`!balance`, `!daily`, `!work`, `!beg`",
-        inline=False
-    )
-
-    if MOD_ROLE_ID in [role.id for role in ctx.author.roles]:
-        embed.add_field(
-            name="👮‍♂️ Mod Commands",
-            value="`!addcoins`, `!removecoins`",
-            inline=False
-        )
-
-    embed.set_footer(text="More features coming soon 🌸")
-    await ctx.send(embed=embed)
+    current = get_balance(user.id)
+    set_balance(user.id, max(0, current - amount))
+    await interaction.response.send_message(f"✅ Removed **{amount} coins** from {user.mention}.")
 
 # ====== START BOT ======
 bot.run(TOKEN)
