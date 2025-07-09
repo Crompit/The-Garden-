@@ -4,11 +4,27 @@ import json
 import random
 import os
 from datetime import datetime, timedelta
+from flask import Flask
+from threading import Thread
 
 # ====== CONFIG ======
 TOKEN = os.getenv("TOKEN") or "YOUR_BOT_TOKEN"
 MOD_ROLE_ID = 1389121338123485224
 DATA_FILE = "garden_data.json"
+
+# ====== KEEP ALIVE ======
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "🌱 The Garden Bot is alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
 # ====== BOT SETUP ======
 intents = discord.Intents.all()
@@ -122,4 +138,5 @@ async def removecoins(interaction: discord.Interaction, user: discord.User, amou
     await interaction.response.send_message(f"✅ Removed {amount} coins from {user.mention}.")
 
 # ====== START BOT ======
+keep_alive()
 bot.run(TOKEN)
