@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timedelta
 
 # ====== CONFIG ======
-TOKEN = os.getenv("TOKEN") or "YOUR-TOKEN-HERE"
+TOKEN = os.getenv("TOKEN") or "YOUR-BOT-TOKEN-HERE"
 CONFESS_CHANNEL_ID = 1392370500914774136
 MOD_ROLE_ID = 1389121338123485224
 DATA_FILE = "/data/garden_data.json"
@@ -17,6 +17,9 @@ intents.messages = True
 intents.guilds = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# REMOVE default help command
+bot.remove_command('help')
 
 # ====== LOAD/SAVE DATA ======
 def load_data():
@@ -114,18 +117,16 @@ async def removecoins(ctx, member: discord.Member, amount: int):
 async def help(ctx):
     embed = discord.Embed(
         title="🌿 The Garden Bot Help",
-        description="Here’s a list of my commands:",
+        description="Here’s all my commands grouped by category:",
         color=discord.Color.green()
     )
 
-    # Economy Commands
     embed.add_field(
         name="🌱 Economy Commands",
         value="`!balance`, `!daily`, `!work`, `!beg`",
         inline=False
     )
 
-    # Mod Commands (visible only to mods)
     if MOD_ROLE_ID in [role.id for role in ctx.author.roles]:
         embed.add_field(
             name="👮‍♂️ Mod Commands",
@@ -133,7 +134,7 @@ async def help(ctx):
             inline=False
         )
 
-    embed.set_footer(text="More features coming soon!")
+    embed.set_footer(text="More features coming soon 🌸")
     await ctx.send(embed=embed)
 
 # ====== START BOT ======
