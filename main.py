@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timedelta
 
 # ====== CONFIG ======
-TOKEN = os.getenv("TOKEN") or "YOUR-TOKEN-HERE"  # Replace with token if no env
+TOKEN = os.getenv("TOKEN") or "YOUR-TOKEN-HERE"
 CONFESS_CHANNEL_ID = 1392370500914774136
 MOD_ROLE_ID = 1389121338123485224
 DATA_FILE = "/data/garden_data.json"
@@ -108,6 +108,33 @@ async def removecoins(ctx, member: discord.Member, amount: int):
     current = get_balance(member.id)
     set_balance(member.id, max(0, current - amount))
     await ctx.send(f"✅ Removed **{amount} coins** from {member.mention}.")
+
+# ====== HELP COMMAND ======
+@bot.command()
+async def help(ctx):
+    embed = discord.Embed(
+        title="🌿 The Garden Bot Help",
+        description="Here’s a list of my commands:",
+        color=discord.Color.green()
+    )
+
+    # Economy Commands
+    embed.add_field(
+        name="🌱 Economy Commands",
+        value="`!balance`, `!daily`, `!work`, `!beg`",
+        inline=False
+    )
+
+    # Mod Commands (visible only to mods)
+    if MOD_ROLE_ID in [role.id for role in ctx.author.roles]:
+        embed.add_field(
+            name="👮‍♂️ Mod Commands",
+            value="`!addcoins`, `!removecoins`",
+            inline=False
+        )
+
+    embed.set_footer(text="More features coming soon!")
+    await ctx.send(embed=embed)
 
 # ====== START BOT ======
 bot.run(TOKEN)
