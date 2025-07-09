@@ -72,8 +72,8 @@ def can_use(user_id, command, cooldown):
 # ====== EVENTS ======
 @bot.event
 async def on_ready():
-    await tree.sync()
-    print(f"✅ Logged in as {bot.user}")
+    await tree.sync()  # Force instant slash command sync
+    print(f"✅ Logged in as {bot.user} and synced commands.")
 
 # ====== ECONOMY COMMANDS ======
 @tree.command(name="balance", description="Check your coin balance")
