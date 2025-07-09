@@ -9,20 +9,21 @@ import os
 from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
-# Load .env variables
+# Load environment variables
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
-REPL_URL = os.getenv("REPL_URL")  # Your public URL (Render/Replit)
+REPL_URL = os.getenv("REPL_URL")
 CONFESS_CHANNEL_ID = 1392370500914774136
 MOD_ROLE_ID = 1389121338123485224
 BALANCES_FILE = "balances.json"
 
 # ====== BOT SETUP ======
 intents = discord.Intents.default()
+intents.messages = True
 intents.guilds = True
 intents.members = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
@@ -120,6 +121,50 @@ async def removecoins(interaction: discord.Interaction, member: discord.Member, 
         await interaction.response.send_message(f"✅ Removed {amount} coins from {member.mention}.")
     else:
         await interaction.response.send_message("❌ You don’t have permission to use this command.", ephemeral=True)
+
+# ====== DAILY COMMAND ======
+last_claims = {}
+
+@tree.command(name="daily", description="Claim your daily reward")
+async def daily(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    now = datetime.utcnow()
+    last_claim = last_claims.get(user_id)
+
+    if last_claim and now - last_claim < timedelta(hours=24):
+        next_claim = last_claim + timedelta(hours=24)
+        remaining = next_claim - now
+        hours, remainder = divmod(int(remaining.total_seconds()), 3600)
+        minutes, _ = divmod(remainder, 60)
+        await interaction.response.send_message(
+            f"🕒 You’ve already claimed your daily. Come back in {hours}h {minutes}m!"
+        )
+        return
+
+    reward = 50  # Daily reward amount
+    set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
+    last_claims[user_id] = now
+    await interaction.response.send_message(f"✅ You claimed your daily **{reward} coins**!")
+
+# ====== WORD-BASED COINS ======
+user_word_cooldowns = {}
+
+@bot.event
+async def on_message(message):
+    if message.author.bot or message.guild is None:
+        return
+
+    user_id = str(message.author.id)
+    now = time.time()
+
+    if user_id not in user_word_cooldowns or now - user_word_cooldowns[user_id] > 10:
+        word_count = len(message.content.split())
+        coins_earned = min(word_count, 10)  # Max 10 coins per message
+        if coins_earned > 0:
+            set_balance(message.author.id, get_balance(message.author.id) + coins_earned)
+        user_word_cooldowns[user_id] = now
+
+    await bot.process_commands(message)
 
 # ====== KEEP ALIVE ======
 app = Flask('')
