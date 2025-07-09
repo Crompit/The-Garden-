@@ -1,21 +1,16 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import asyncio
 import json
 import random
 import os
-from flask import Flask
-from threading import Thread
-from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
 # ====== CONFIG ======
-load_dotenv()
 TOKEN = os.getenv("TOKEN")
 CONFESS_CHANNEL_ID = 1392370500914774136
 MOD_ROLE_ID = 1389121338123485224
-TEST_SERVER_ID = 1389063140989337630  # Instant sync only in this server
+TEST_SERVER_ID = 1389063140989337630  # Your server for instant testing
 DATA_FILE = "/data/garden_data.json"
 
 # ====== BOT SETUP ======
@@ -46,19 +41,6 @@ def set_balance(user_id, amount):
     data["balances"][str(user_id)] = amount
     save_data()
 
-def get_garden(user_id):
-    return data["gardens"].get(str(user_id), {})
-
-def add_plant(user_id, plant_name):
-    garden = get_garden(user_id)
-    garden[plant_name] = garden.get(plant_name, 0) + 1
-    data["gardens"][str(user_id)] = garden
-    save_data()
-
-def clear_garden(user_id):
-    data["gardens"][str(user_id)] = {}
-    save_data()
-
 def can_use(user_id, command, cooldown):
     now = datetime.utcnow()
     user_cooldowns = data["cooldowns"].get(str(user_id), {})
@@ -74,8 +56,13 @@ def can_use(user_id, command, cooldown):
 @bot.event
 async def on_ready():
     try:
-        synced = await tree.sync(guild=discord.Object(id=TEST_SERVER_ID))
-        print(f"✅ Synced {len(synced)} commands instantly to server {TEST_SERVER_ID}!")
+        # Force sync globally (takes 1 hour first time)
+        synced = await tree.sync()
+        print(f"✅ Globally synced {len(synced)} commands!")
+        
+        # ALSO sync instantly to your testing server
+        await tree.sync(guild=discord.Object(id=TEST_SERVER_ID))
+        print(f"⚡ Instant sync to server {TEST_SERVER_ID}!")
     except Exception as e:
         print(f"❌ Sync error: {e}")
 
@@ -93,7 +80,7 @@ async def daily(interaction: discord.Interaction):
         return
     reward = random.randint(50, 150)
     set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
-    await interaction.response.send_message(f"🎁 {interaction.user.mention}, you claimed **{reward} coins** as your daily reward!")
+    await interaction.response.send_message(f"🎁 {interaction.user.mention}, you claimed **{reward} coins**!")
 
 @tree.command(name="work", description="Do some work and earn coins")
 async def work(interaction: discord.Interaction):
@@ -117,22 +104,7 @@ async def beg(interaction: discord.Interaction):
     set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
     await interaction.response.send_message(f"🙏 {interaction.user.mention}, someone gave you **{reward} coins**!")
 
-@tree.command(name="give", description="Give coins to another user")
-@app_commands.describe(member="User to give coins to", amount="Amount to give")
-async def give(interaction: discord.Interaction, member: discord.Member, amount: int):
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be positive.")
-        return
-    giver_balance = get_balance(interaction.user.id)
-    if giver_balance < amount:
-        await interaction.response.send_message("❌ You don’t have enough coins.")
-        return
-    set_balance(interaction.user.id, giver_balance - amount)
-    set_balance(member.id, get_balance(member.id) + amount)
-    await interaction.response.send_message(f"✅ Gave **{amount} coins** to {member.mention}!")
-
 @tree.command(name="addcoins", description="(Mods Only) Add coins to a user")
-@app_commands.describe(member="User to add coins to", amount="Amount to add")
 async def addcoins(interaction: discord.Interaction, member: discord.Member, amount: int):
     if MOD_ROLE_ID not in [role.id for role in interaction.user.roles]:
         await interaction.response.send_message("❌ You don’t have permission.")
@@ -141,7 +113,6 @@ async def addcoins(interaction: discord.Interaction, member: discord.Member, amo
     await interaction.response.send_message(f"✅ Added **{amount} coins** to {member.mention}!")
 
 @tree.command(name="removecoins", description="(Mods Only) Remove coins from a user")
-@app_commands.describe(member="User to remove coins from", amount="Amount to remove")
 async def removecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
     if MOD_ROLE_ID not in [role.id for role in interaction.user.roles]:
         await interaction.response.send_message("❌ You don’t have permission.")
@@ -149,22 +120,6 @@ async def removecoins(interaction: discord.Interaction, member: discord.Member, 
     current = get_balance(member.id)
     set_balance(member.id, max(0, current - amount))
     await interaction.response.send_message(f"✅ Removed **{amount} coins** from {member.mention}.")
-
-# ====== FLASK KEEPALIVE ======
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "🌱 The Garden Bot is alive!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-keep_alive()
 
 # ====== START BOT ======
 bot.run(TOKEN)
