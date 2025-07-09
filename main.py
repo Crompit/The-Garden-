@@ -131,5 +131,14 @@ async def removecoins(interaction: discord.Interaction, user: discord.User, amou
     set_balance(user.id, max(0, current - amount))
     await interaction.response.send_message(f"✅ Removed **{amount} coins** from {user.mention}.")
 
+@bot.event
+async def on_ready():
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} slash commands globally!")
+    except Exception as e:
+        print(f"❌ Sync failed: {e}")
+    print(f"🌱 {bot.user} is online.")
+
 # ====== START BOT ======
 bot.run(TOKEN)
