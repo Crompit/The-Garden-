@@ -166,13 +166,20 @@ async def luck(interaction: discord.Interaction, duration: int = 5):
     await interaction.response.send_message(f"🍀 Luck boost activated for {duration} minutes!")
 
 @bot.tree.command(name="spawnweather", description="Admin: Spawn a weather event")
+@app_commands.describe(event="Name of the weather event")
 async def spawnweather(interaction: discord.Interaction, event: str):
     if not interaction.user.guild_permissions.manage_guild:
         await interaction.response.send_message("🚫 You don't have permission.", ephemeral=True)
         return
+
+    if event not in weather_events:
+        await interaction.response.send_message(f"⚠️ Invalid weather! Options: {', '.join(weather_events.keys())}", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"🌤️ Setting weather to **{event}**...")
     global current_weather
     current_weather = event
-    await interaction.response.send_message(f"🌤️ Weather set to {event}!")
+    print(f"✅ Admin manually set weather to {event}")
 
 @bot.tree.command(name="growall", description="Admin: Grow all plants instantly")
 async def growall(interaction: discord.Interaction):
