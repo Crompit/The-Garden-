@@ -24,13 +24,13 @@ luck_multiplier = 1.0
 
 # Weather events and their multipliers
 weather_events = {
-    "rain": 1.5,
-    "thunderstorm": 2.0,
-    "blizzard": 1.8,
-    "heatwave": 0.5,
-    "sandstorm": 1.2,
-    "disco": 5.0,  # Admin only
-    "dj_party": 10.0  # Admin only
+    "rain": 2,
+    "thunderstorm": 100,
+    "blizzard": 70,
+    "heatwave": 30,
+    "sandstorm": 1,
+    "disco": 120,  # Admin only
+    "dj_party": 180  # Admin only
 }
 
 # Plant rarities
