@@ -9,7 +9,7 @@ from threading import Thread
 TOKEN = os.getenv("TOKEN")
 MOD_ROLE_ID = 1389121338123485224  # Replace with mod role ID
 ADMIN_ROLE_ID = 1389121338123485224  # Replace with admin role ID
-CONFESS_CHANNEL_ID = 123456789012345678  # Replace with confession channel ID
+CONFESS_CHANNEL_ID = 1392370500914774136  # Replace with confession channel ID
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
