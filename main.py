@@ -1,47 +1,30 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import random
 import asyncio
-from flask import Flask
-import threading
+import random
 import os
-
-TOKEN = os.environ['TOKEN']  # Render token from environment
+from flask import Flask
+from threading import Thread
 
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.members = True
 
+TOKEN = os.getenv("TOKEN")
+GUILD_ID = 1389063140989337630
+CONFESS_CHANNEL_ID = 1392370500914774136
+SHOP_CHANNEL_ID = 1392827882484535358
+ADMIN_ROLE_ID = 1389121338123485224
+
 bot = commands.Bot(command_prefix="!", intents=intents)
+tree = bot.tree
 
-# Economy storage
-user_balances = {}
-user_plants = {}
-current_weather = None
-luck_multiplier = 1.0
+user_data = {}
+shop_items = []
 
-# Weather events and their multipliers
-weather_events = {
-    "rain": 2,
-    "thunderstorm": 100,
-    "blizzard": 70,
-    "heatwave": 30,
-    "sandstorm": 1,
-    "disco": 120,  # Admin only
-    "dj_party": 180  # Admin only
-}
-
-# Plant rarities
-plants = {
-    "sunflower": 7,
-    "rose": 23,
-    "tulip": 30,
-    "daisy": 40
-}
-
-# Flask keepalive
+# Flask keep-alive
 app = Flask('')
 
 @app.route('/')
@@ -52,130 +35,126 @@ def run():
     app.run(host='0.0.0.0', port=8080)
 
 def keep_alive():
-    t = threading.Thread(target=run)
+    t = Thread(target=run)
     t.start()
 
 keep_alive()
 
-# Auto weather every 10 mins
-@tasks.loop(minutes=10)
-async def auto_weather():
-    global current_weather, luck_multiplier
-    current_weather = random.choice(list(weather_events.keys()))
-    luck_multiplier = weather_events[current_weather]
-    print(f"🌦️ Auto weather: {current_weather} (x{luck_multiplier})")
-    await asyncio.sleep(120)  # Event lasts 2 minutes
-    current_weather = None
-    luck_multiplier = 1.0
-    print("⛅ Weather cleared.")
+# Helper Functions
+def is_admin(interaction):
+    return any(role.id == ADMIN_ROLE_ID for role in interaction.user.roles)
 
-@bot.event
-async def on_ready():
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} slash commands")
-    except Exception as e:
-        print(e)
-    auto_weather.start()
-    print(f"🌱 The Garden Bot is online as {bot.user}")
+def get_balance(user_id):
+    return user_data.get(user_id, {}).get("coins", 0)
 
-# Economy commands
-@bot.tree.command(name="balance", description="Check your balance")
+def add_coins(user_id, amount):
+    user_data.setdefault(user_id, {"coins": 0, "plants": []})
+    user_data[user_id]["coins"] += amount
+
+def remove_coins(user_id, amount):
+    user_data.setdefault(user_id, {"coins": 0, "plants": []})
+    user_data[user_id]["coins"] = max(0, user_data[user_id]["coins"] - amount)
+
+# Economy Commands
+@tree.command(name="balance", description="Check your balance")
 async def balance(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    balance = user_balances.get(user_id, 0)
-    await interaction.response.send_message(f"💰 You have {balance} coins.")
+    coins = get_balance(interaction.user.id)
+    await interaction.response.send_message(f"🌱 You have {coins} coins.", ephemeral=True)
 
-@bot.tree.command(name="daily", description="Claim daily coins")
+@tree.command(name="daily", description="Claim your daily reward")
 async def daily(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    coins = random.randint(50, 100)
-    user_balances[user_id] = user_balances.get(user_id, 0) + coins
-    await interaction.response.send_message(f"🎁 You claimed your daily {coins} coins!")
+    add_coins(interaction.user.id, 100)
+    await interaction.response.send_message("💰 You claimed 100 daily coins!", ephemeral=True)
 
-@bot.tree.command(name="beg", description="Beg for some coins")
+@tree.command(name="beg", description="Beg for coins (5 min cooldown)")
 async def beg(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    coins = random.randint(5, 20)
-    user_balances[user_id] = user_balances.get(user_id, 0) + coins
-    await interaction.response.send_message(f"🙏 Someone gave you {coins} coins!")
+    coins = random.randint(5, 25)
+    add_coins(interaction.user.id, coins)
+    await interaction.response.send_message(f"🙏 You received {coins} coins from begging.", ephemeral=True)
 
-@bot.tree.command(name="work", description="Work to earn coins")
-async def work(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    jobs = ["Gardener", "Farmer", "Botanist", "Florist"]
-    job = random.choice(jobs)
-    coins = random.randint(20, 80)
-    user_balances[user_id] = user_balances.get(user_id, 0) + coins
-    await interaction.response.send_message(f"👨‍🌾 You worked as a {job} and earned {coins} coins.")
-
-# Admin commands
-@bot.tree.command(name="addcoins", description="Admin: Add coins to a user")
+@tree.command(name="addcoins", description="Add coins to a user (Admin only)")
 @app_commands.describe(user="User to add coins to", amount="Amount of coins")
-async def addcoins(interaction: discord.Interaction, user: discord.User, amount: int):
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("🚫 You don't have permission.", ephemeral=True)
+async def addcoins(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
         return
-    user_id = str(user.id)
-    user_balances[user_id] = user_balances.get(user_id, 0) + amount
+    add_coins(user.id, amount)
     await interaction.response.send_message(f"✅ Added {amount} coins to {user.mention}.")
 
-@bot.tree.command(name="removecoins", description="Admin: Remove coins from a user")
+@tree.command(name="removecoins", description="Remove coins from a user (Admin only)")
 @app_commands.describe(user="User to remove coins from", amount="Amount of coins")
-async def removecoins(interaction: discord.Interaction, user: discord.User, amount: int):
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("🚫 You don't have permission.", ephemeral=True)
+async def removecoins(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not is_admin(interaction):
+        await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
         return
-    user_id = str(user.id)
-    user_balances[user_id] = max(user_balances.get(user_id, 0) - amount, 0)
+    remove_coins(user.id, amount)
     await interaction.response.send_message(f"✅ Removed {amount} coins from {user.mention}.")
 
-# Planting system
-@bot.tree.command(name="plant", description="Plant seeds in your garden")
+# Plant & Harvest
+plants = {
+    "Rose": 23,
+    "Sunflower": 7,
+    "Tulip": 15,
+    "Lily": 10,
+    "Orchid": 5
+}
+
+@tree.command(name="plant", description="Plant a random seed")
 async def plant(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    cost = 20
-    if user_balances.get(user_id, 0) < cost:
-        await interaction.response.send_message("❌ You need 20 coins to plant.")
-        return
-    user_balances[user_id] -= cost
     chance = random.randint(1, 100)
-    result = None
     for plant, rarity in plants.items():
         if chance <= rarity:
-            result = plant
-            break
-    if not result:
-        result = "common grass"
-    user_plants[user_id] = user_plants.get(user_id, []) + [result]
-    await interaction.response.send_message(f"🌱 You planted a seed and grew a **{result}**!")
+            user_data.setdefault(interaction.user.id, {"coins": 0, "plants": []})
+            user_data[interaction.user.id]["plants"].append(plant)
+            await interaction.response.send_message(f"🌱 You planted a {plant}!")
+            return
+    await interaction.response.send_message("🌾 You planted, but nothing grew.")
 
-@bot.tree.command(name="harvest", description="Harvest your plants")
+@tree.command(name="harvest", description="Harvest your plants for coins")
 async def harvest(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    if user_id not in user_plants or not user_plants[user_id]:
-        await interaction.response.send_message("🌾 You have no plants to harvest.")
+    plants_owned = user_data.get(interaction.user.id, {}).get("plants", [])
+    if not plants_owned:
+        await interaction.response.send_message("❌ You don’t have any plants to harvest.", ephemeral=True)
         return
-    reward = random.randint(30, 100) * luck_multiplier
-    reward = int(reward)
-    user_balances[user_id] += reward
-    harvested = len(user_plants[user_id])
-    user_plants[user_id] = []
-    await interaction.response.send_message(f"🌾 You harvested {harvested} plants and earned {reward} coins!")
+    reward = len(plants_owned) * random.randint(50, 150)
+    user_data[interaction.user.id]["plants"] = []
+    add_coins(interaction.user.id, reward)
+    await interaction.response.send_message(f"🌾 You harvested your plants and earned {reward} coins!")
 
-# Spawn weather (admin only)
-@bot.tree.command(name="spawnweather", description="Admin: Spawn a weather event")
-@app_commands.describe(event="Name of the weather event")
-async def spawnweather(interaction: discord.Interaction, event: str):
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("🚫 You don't have permission.", ephemeral=True)
-        return
-    if event not in weather_events:
-        await interaction.response.send_message(f"⚠️ Invalid weather! Options: {', '.join(weather_events.keys())}", ephemeral=True)
-        return
-    global current_weather, luck_multiplier
-    current_weather = event
-    luck_multiplier = weather_events[event]
-    await interaction.response.send_message(f"🌤️ Weather set to **{event}** with x{luck_multiplier} multiplier.")
+# Confess
+@tree.command(name="confess", description="Send an anonymous confession")
+@app_commands.describe(message="Your confession")
+async def confess(interaction: discord.Interaction, message: str):
+    channel = bot.get_channel(CONFESS_CHANNEL_ID)
+    if channel:
+        await channel.send(f"💬 Anonymous Confession:\n{message}")
+        await interaction.response.send_message("✅ Your confession was sent anonymously.", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Confession channel not found.", ephemeral=True)
+
+# Shop System
+@tasks.loop(minutes=5)
+async def restock_shop():
+    global shop_items
+    shop_items = random.sample(list(plants.keys()), k=3)
+    stock_channel = bot.get_channel(SHOP_CHANNEL_ID)
+    if stock_channel:
+        items_list = "\n".join([f"🪴 {item}" for item in shop_items])
+        await stock_channel.send(f"🛒 **Shop Restock!**\n{items_list}")
+
+@tree.command(name="shop", description="View current shop items")
+async def shop(interaction: discord.Interaction):
+    if shop_items:
+        items = "\n".join([f"🪴 {item}" for item in shop_items])
+        await interaction.response.send_message(f"🛒 **Current Shop Stock:**\n{items}", ephemeral=True)
+    else:
+        await interaction.response.send_message("🛒 Shop is empty. Wait for restock.", ephemeral=True)
+
+# Start Tasks
+@bot.event
+async def on_ready():
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    restock_shop.start()
+    print(f"✅ {bot.user} is online!")
 
 bot.run(TOKEN)
