@@ -1,149 +1,170 @@
 import discord
-from discord.ext import commands
-import json
+from discord.ext import commands, tasks
+from discord import app_commands
 import random
+import asyncio
+import json
 import os
-from datetime import datetime, timedelta
-from flask import Flask
-from threading import Thread
 
-# ====== CONFIG ======
-TOKEN = os.getenv("TOKEN") or "YOUR_BOT_TOKEN"
-MOD_ROLE_ID = 1389121338123485224
-DATA_FILE = "garden_data.json"
-
-# ====== KEEP ALIVE ======
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "🌱 The Garden Bot is alive!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# ====== BOT SETUP ======
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ====== LOAD/SAVE DATA ======
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    return {"balances": {}, "cooldowns": {}}
+data_file = "economy.json"
+
+# Load or initialize economy data
+if os.path.exists(data_file):
+    with open(data_file, "r") as f:
+        economy = json.load(f)
+else:
+    economy = {}
 
 def save_data():
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f)
-
-data = load_data()
+    with open(data_file, "w") as f:
+        json.dump(economy, f, indent=4)
 
 def get_balance(user_id):
-    return data["balances"].get(str(user_id), 0)
+    return economy.get(str(user_id), {}).get("coins", 0)
 
-def set_balance(user_id, amount):
-    data["balances"][str(user_id)] = amount
+def add_coins(user_id, amount):
+    user_id = str(user_id)
+    if user_id not in economy:
+        economy[user_id] = {"coins": 0, "plants": 0}
+    economy[user_id]["coins"] += amount
     save_data()
 
-def can_use(user_id, command, cooldown):
-    now = datetime.utcnow()
-    user_cooldowns = data["cooldowns"].get(str(user_id), {})
-    last_used = user_cooldowns.get(command)
-    if last_used and (now - datetime.fromisoformat(last_used)) < timedelta(seconds=cooldown):
-        return False, cooldown - (now - datetime.fromisoformat(last_used)).seconds
-    user_cooldowns[command] = now.isoformat()
-    data["cooldowns"][str(user_id)] = user_cooldowns
-    save_data()
-    return True, 0
+def remove_coins(user_id, amount):
+    user_id = str(user_id)
+    if user_id in economy:
+        economy[user_id]["coins"] = max(economy[user_id]["coins"] - amount, 0)
+        save_data()
 
-# ====== EVENTS ======
+def add_plant(user_id):
+    user_id = str(user_id)
+    if user_id not in economy:
+        economy[user_id] = {"coins": 0, "plants": 0}
+    economy[user_id]["plants"] += 1
+    save_data()
+
+# ===== Economy Commands =====
+
+@bot.tree.command(name="balance")
+async def balance(interaction: discord.Interaction):
+    coins = get_balance(interaction.user.id)
+    await interaction.response.send_message(f"🌱 {interaction.user.mention} has {coins} coins!")
+
+@bot.tree.command(name="work")
+async def work(interaction: discord.Interaction):
+    earnings = random.randint(10, 50)
+    add_coins(interaction.user.id, earnings)
+    await interaction.response.send_message(f"💼 You worked hard and earned {earnings} coins!")
+
+@bot.tree.command(name="beg")
+async def beg(interaction: discord.Interaction):
+    earnings = random.randint(1, 10)
+    add_coins(interaction.user.id, earnings)
+    await interaction.response.send_message(f"🙏 Someone gave you {earnings} coins!")
+
+@bot.tree.command(name="daily")
+async def daily(interaction: discord.Interaction):
+    earnings = random.randint(50, 100)
+    add_coins(interaction.user.id, earnings)
+    await interaction.response.send_message(f"📅 You claimed your daily reward of {earnings} coins!")
+
+@bot.tree.command(name="addcoins")
+@app_commands.checks.has_role("Mods")
+async def addcoins(interaction: discord.Interaction, member: discord.Member, amount: int):
+    add_coins(member.id, amount)
+    await interaction.response.send_message(f"✅ Added {amount} coins to {member.mention}")
+
+@bot.tree.command(name="removecoins")
+@app_commands.checks.has_role("Mods")
+async def removecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
+    remove_coins(member.id, amount)
+    await interaction.response.send_message(f"❌ Removed {amount} coins from {member.mention}")
+
+# ===== Garden Features =====
+
+@bot.tree.command(name="plant")
+async def plant(interaction: discord.Interaction):
+    cost = 20
+    if get_balance(interaction.user.id) >= cost:
+        remove_coins(interaction.user.id, cost)
+        add_plant(interaction.user.id)
+        await interaction.response.send_message(f"🌱 You planted a seed! (-{cost} coins)")
+    else:
+        await interaction.response.send_message("💸 Not enough coins to plant!")
+
+@bot.tree.command(name="harvest")
+async def harvest(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    if economy.get(user_id, {}).get("plants", 0) > 0:
+        reward = random.randint(30, 70)
+        add_coins(interaction.user.id, reward)
+        economy[user_id]["plants"] -= 1
+        save_data()
+        await interaction.response.send_message(f"🌾 You harvested a plant and got {reward} coins!")
+    else:
+        await interaction.response.send_message("❌ You have no plants to harvest!")
+
+@bot.tree.command(name="inventory")
+async def inventory(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    plants = economy.get(user_id, {}).get("plants", 0)
+    coins = get_balance(interaction.user.id)
+    await interaction.response.send_message(f"🎒 You have {plants} plants and {coins} coins.")
+
+# ===== Fun Games =====
+
+@bot.tree.command(name="coinflip")
+async def coinflip(interaction: discord.Interaction, bet: int, guess: str):
+    guess = guess.lower()
+    if guess not in ["heads", "tails"]:
+        await interaction.response.send_message("❌ Guess must be 'heads' or 'tails'.")
+        return
+    if get_balance(interaction.user.id) < bet:
+        await interaction.response.send_message("💸 Not enough coins!")
+        return
+    result = random.choice(["heads", "tails"])
+    if result == guess:
+        add_coins(interaction.user.id, bet)
+        await interaction.response.send_message(f"🎉 It was {result}! You won {bet} coins!")
+    else:
+        remove_coins(interaction.user.id, bet)
+        await interaction.response.send_message(f"😢 It was {result}! You lost {bet} coins.")
+
+@bot.tree.command(name="slots")
+async def slots(interaction: discord.Interaction, bet: int):
+    if get_balance(interaction.user.id) < bet:
+        await interaction.response.send_message("💸 Not enough coins!")
+        return
+    emojis = ["🍒", "🍋", "🔔", "⭐", "🍇"]
+    result = [random.choice(emojis) for _ in range(3)]
+    await interaction.response.send_message(f"🎰 {' '.join(result)}")
+    if len(set(result)) == 1:
+        winnings = bet * 5
+        add_coins(interaction.user.id, winnings)
+        await interaction.followup.send(f"🎉 JACKPOT! You won {winnings} coins!")
+    else:
+        remove_coins(interaction.user.id, bet)
+        await interaction.followup.send(f"😢 You lost {bet} coins.")
+
+# ===== Leaderboard =====
+
+@bot.tree.command(name="top")
+async def top(interaction: discord.Interaction):
+    leaderboard = sorted(economy.items(), key=lambda x: x[1]["coins"], reverse=True)[:5]
+    msg = "\n".join(
+        [f"#{i+1} <@{uid}>: {data['coins']} coins" for i, (uid, data) in enumerate(leaderboard)]
+    )
+    await interaction.response.send_message(f"🏆 Top 5 Richest:\n{msg}")
+
+# ===== On Ready =====
+
 @bot.event
 async def on_ready():
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} slash commands globally!")
-    except Exception as e:
-        print(f"❌ Sync failed: {e}")
-    print(f"🌱 {bot.user} is online.")
+    await bot.tree.sync()
+    print(f"✅ Logged in as {bot.user}")
 
-# ====== SLASH COMMANDS ======
-@bot.tree.command(name="help", description="Show all The Garden Bot commands")
-async def help_command(interaction: discord.Interaction):
-    await interaction.response.defer()
-    embed = discord.Embed(
-        title="🌿 The Garden Bot Help",
-        description="All available commands:",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Economy", value="/balance, /daily, /work, /beg", inline=False)
-    embed.add_field(name="Moderation (Mods)", value="/addcoins, /removecoins", inline=False)
-    await interaction.followup.send(embed=embed)
+# ===== Run Bot =====
 
-@bot.tree.command(name="balance", description="Check your coin balance")
-async def balance(interaction: discord.Interaction):
-    await interaction.response.defer()
-    bal = get_balance(interaction.user.id)
-    await interaction.followup.send(f"💰 {interaction.user.mention}, you have **{bal} coins**.")
-
-@bot.tree.command(name="daily", description="Claim your daily reward")
-async def daily(interaction: discord.Interaction):
-    await interaction.response.defer()
-    can_claim, wait = can_use(interaction.user.id, "daily", 86400)
-    if not can_claim:
-        await interaction.followup.send(f"⏳ Claim again in {wait // 60}m {wait % 60}s.", ephemeral=True)
-        return
-    reward = random.randint(50, 150)
-    set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
-    await interaction.followup.send(f"🎁 {interaction.user.mention}, you got **{reward} coins**!")
-
-@bot.tree.command(name="work", description="Work and earn coins (1h cooldown)")
-async def work(interaction: discord.Interaction):
-    await interaction.response.defer()
-    can_work, wait = can_use(interaction.user.id, "work", 3600)
-    if not can_work:
-        await interaction.followup.send(f"⏳ Work again in {wait // 60}m {wait % 60}s.", ephemeral=True)
-        return
-    jobs = ["Gardener", "Botanist", "Farmer"]
-    job = random.choice(jobs)
-    pay = random.randint(20, 100)
-    set_balance(interaction.user.id, get_balance(interaction.user.id) + pay)
-    await interaction.followup.send(f"👨‍🌾 {interaction.user.mention}, you worked as a {job} and earned **{pay} coins**!")
-
-@bot.tree.command(name="beg", description="Beg for some coins (5m cooldown)")
-async def beg(interaction: discord.Interaction):
-    await interaction.response.defer()
-    can_beg, wait = can_use(interaction.user.id, "beg", 300)
-    if not can_beg:
-        await interaction.followup.send(f"⏳ Beg again in {wait}s.", ephemeral=True)
-        return
-    reward = random.randint(5, 30)
-    set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
-    await interaction.followup.send(f"🙏 {interaction.user.mention}, you got **{reward} coins**!")
-
-@bot.tree.command(name="addcoins", description="(Mods) Add coins to a user")
-async def addcoins(interaction: discord.Interaction, user: discord.User, amount: int):
-    await interaction.response.defer()
-    if MOD_ROLE_ID not in [role.id for role in interaction.user.roles]:
-        await interaction.followup.send("❌ You don’t have permission.", ephemeral=True)
-        return
-    set_balance(user.id, get_balance(user.id) + amount)
-    await interaction.followup.send(f"✅ Added {amount} coins to {user.mention}.")
-
-@bot.tree.command(name="removecoins", description="(Mods) Remove coins from a user")
-async def removecoins(interaction: discord.Interaction, user: discord.User, amount: int):
-    await interaction.response.defer()
-    if MOD_ROLE_ID not in [role.id for role in interaction.user.roles]:
-        await interaction.followup.send("❌ You don’t have permission.", ephemeral=True)
-        return
-    current = get_balance(user.id)
-    set_balance(user.id, max(0, current - amount))
-    await interaction.followup.send(f"✅ Removed {amount} coins from {user.mention}.")
-
-# ====== START BOT ======
-keep_alive()
-bot.run(TOKEN)
+bot.run(os.environ["TOKEN"])
