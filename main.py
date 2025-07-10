@@ -74,68 +74,75 @@ async def on_ready():
 # ====== SLASH COMMANDS ======
 @bot.tree.command(name="help", description="Show all The Garden Bot commands")
 async def help_command(interaction: discord.Interaction):
+    await interaction.response.defer()
     embed = discord.Embed(
         title="🌿 The Garden Bot Help",
-        description="Commands you can use:",
+        description="All available commands:",
         color=discord.Color.green()
     )
     embed.add_field(name="Economy", value="/balance, /daily, /work, /beg", inline=False)
     embed.add_field(name="Moderation (Mods)", value="/addcoins, /removecoins", inline=False)
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="balance", description="Check your coin balance")
 async def balance(interaction: discord.Interaction):
+    await interaction.response.defer()
     bal = get_balance(interaction.user.id)
-    await interaction.response.send_message(f"💰 {interaction.user.mention}, you have **{bal} coins**.")
+    await interaction.followup.send(f"💰 {interaction.user.mention}, you have **{bal} coins**.")
 
 @bot.tree.command(name="daily", description="Claim your daily reward")
 async def daily(interaction: discord.Interaction):
+    await interaction.response.defer()
     can_claim, wait = can_use(interaction.user.id, "daily", 86400)
     if not can_claim:
-        await interaction.response.send_message(f"⏳ Claim again in {wait // 60}m {wait % 60}s.", ephemeral=True)
+        await interaction.followup.send(f"⏳ Claim again in {wait // 60}m {wait % 60}s.", ephemeral=True)
         return
     reward = random.randint(50, 150)
     set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
-    await interaction.response.send_message(f"🎁 {interaction.user.mention}, you got **{reward} coins**!")
+    await interaction.followup.send(f"🎁 {interaction.user.mention}, you got **{reward} coins**!")
 
 @bot.tree.command(name="work", description="Work and earn coins (1h cooldown)")
 async def work(interaction: discord.Interaction):
+    await interaction.response.defer()
     can_work, wait = can_use(interaction.user.id, "work", 3600)
     if not can_work:
-        await interaction.response.send_message(f"⏳ Work again in {wait // 60}m {wait % 60}s.", ephemeral=True)
+        await interaction.followup.send(f"⏳ Work again in {wait // 60}m {wait % 60}s.", ephemeral=True)
         return
     jobs = ["Gardener", "Botanist", "Farmer"]
     job = random.choice(jobs)
     pay = random.randint(20, 100)
     set_balance(interaction.user.id, get_balance(interaction.user.id) + pay)
-    await interaction.response.send_message(f"👨‍🌾 {interaction.user.mention}, you worked as a {job} and earned **{pay} coins**!")
+    await interaction.followup.send(f"👨‍🌾 {interaction.user.mention}, you worked as a {job} and earned **{pay} coins**!")
 
 @bot.tree.command(name="beg", description="Beg for some coins (5m cooldown)")
 async def beg(interaction: discord.Interaction):
+    await interaction.response.defer()
     can_beg, wait = can_use(interaction.user.id, "beg", 300)
     if not can_beg:
-        await interaction.response.send_message(f"⏳ Beg again in {wait}s.", ephemeral=True)
+        await interaction.followup.send(f"⏳ Beg again in {wait}s.", ephemeral=True)
         return
     reward = random.randint(5, 30)
     set_balance(interaction.user.id, get_balance(interaction.user.id) + reward)
-    await interaction.response.send_message(f"🙏 {interaction.user.mention}, you got **{reward} coins**!")
+    await interaction.followup.send(f"🙏 {interaction.user.mention}, you got **{reward} coins**!")
 
 @bot.tree.command(name="addcoins", description="(Mods) Add coins to a user")
 async def addcoins(interaction: discord.Interaction, user: discord.User, amount: int):
+    await interaction.response.defer()
     if MOD_ROLE_ID not in [role.id for role in interaction.user.roles]:
-        await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
+        await interaction.followup.send("❌ You don’t have permission.", ephemeral=True)
         return
     set_balance(user.id, get_balance(user.id) + amount)
-    await interaction.response.send_message(f"✅ Added {amount} coins to {user.mention}.")
+    await interaction.followup.send(f"✅ Added {amount} coins to {user.mention}.")
 
 @bot.tree.command(name="removecoins", description="(Mods) Remove coins from a user")
 async def removecoins(interaction: discord.Interaction, user: discord.User, amount: int):
+    await interaction.response.defer()
     if MOD_ROLE_ID not in [role.id for role in interaction.user.roles]:
-        await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
+        await interaction.followup.send("❌ You don’t have permission.", ephemeral=True)
         return
     current = get_balance(user.id)
     set_balance(user.id, max(0, current - amount))
-    await interaction.response.send_message(f"✅ Removed {amount} coins from {user.mention}.")
+    await interaction.followup.send(f"✅ Removed {amount} coins from {user.mention}.")
 
 # ====== START BOT ======
 keep_alive()
