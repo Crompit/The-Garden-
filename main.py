@@ -1,185 +1,150 @@
 import discord
 from discord.ext import commands, tasks
-import random, asyncio, json
-from datetime import datetime, timedelta
+from discord.ext.commands import has_permissions
+import json
+import random
+import asyncio
+import os
 from flask import Flask
 from threading import Thread
 
-# Flask keep-alive
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="/", intents=intents)
+
+# Flask for uptime
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "🌱 The Garden Bot is alive!"
+    return "The Garden Bot is alive!"
 
-def run():
-    app.run(host='0.0.0.0', port=8080)
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 
 def keep_alive():
-    t = Thread(target=run)
+    t = Thread(target=run_flask)
     t.start()
 
-# Bot setup
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="/", intents=intents)
+keep_alive()
 
-# Economy storage
-try:
-    with open("economy.json", "r") as f:
+# Load economy data
+if os.path.exists('economy.json'):
+    with open('economy.json', 'r') as f:
         economy = json.load(f)
-except FileNotFoundError:
+else:
     economy = {}
-
-# Events & boosts
-active_events = {}
-event_boosts = {
-    "thunderstorm": 100,
-    "wet": 2,
-    "sandstorm": 0.5,
-    "sunshine": 1.5,
-    "blizzard": 0.7,
-    "heatwave": 1.2,
-    "rainbow": 3,
-    "drought": 0.3,
-    "fertilizer": 2,
-    "moonlight": 1.1,
-    "dj": 5,
-    "disco": 10
-}
-
-plants = {
-    "Sunflower": 7,
-    "Rose": 23,
-    "Tulip": 30,
-    "Lily": 25,
-    "Orchid": 10,
-    "Daisy": 5
-}
-
-cooldowns = {}
 
 # Save data
 def save_economy():
-    with open("economy.json", "w") as f:
-        json.dump(economy, f)
+    with open('economy.json', 'w') as f:
+        json.dump(economy, f, indent=4)
 
-# Check & update balance
-def get_balance(user_id):
-    return economy.get(str(user_id), {}).get("coins", 0)
+# Rare plants
+plants = {
+    "Rose": 0.23,
+    "Sunflower": 0.07,
+    "Tulip": 0.15,
+    "Daisy": 0.2,
+    "Orchid": 0.05,
+    "Lily": 0.1,
+    "Carnation": 0.2
+}
 
-def update_balance(user_id, amount):
-    economy.setdefault(str(user_id), {"coins": 0, "inventory": []})
-    economy[str(user_id)]["coins"] += amount
-    save_economy()
+# Event multipliers
+active_event = {"name": None, "multiplier": 1}
 
-# Garden Commands
-@bot.slash_command(name="balance")
-async def balance(ctx):
-    coins = get_balance(ctx.author.id)
-    await ctx.respond(f"🌱 {ctx.author.mention}, you have **{coins} coins**.")
+events = {
+    "Thunderstorm": 100,
+    "Rain": 2,
+    "Sunshine": 1.5,
+    "Drought": 0.5,
+    "Disco": 5,
+    "DJ Jhai": 10
+}
 
-@bot.slash_command(name="daily")
-async def daily(ctx):
-    user = ctx.author
-    now = datetime.utcnow()
-    last = economy.get(str(user.id), {}).get("last_daily")
-
-    if last and (now - datetime.fromisoformat(last)) < timedelta(days=1):
-        await ctx.respond("⏳ You already claimed your daily reward today!")
-        return
-
-    update_balance(user.id, 100)
-    economy[str(user.id)]["last_daily"] = now.isoformat()
-    save_economy()
-    await ctx.respond("✅ You claimed your daily 100 coins!")
-
-@bot.slash_command(name="plant")
-async def plant(ctx):
-    user = ctx.author
-    cost = 50
-    if get_balance(user.id) < cost:
-        await ctx.respond("💸 You need 50 coins to plant!")
-        return
-
-    update_balance(user.id, -cost)
-    plant_choice = random.choices(list(plants.keys()), weights=plants.values())[0]
-    economy[str(user.id)]["inventory"].append(plant_choice)
-    save_economy()
-    await ctx.respond(f"🌱 You planted a **{plant_choice}**!")
-
-@bot.slash_command(name="harvest")
-async def harvest(ctx):
-    user = ctx.author
-    inventory = economy.get(str(user.id), {}).get("inventory", [])
-    if not inventory:
-        await ctx.respond("🌾 You don’t have any plants to harvest!")
-        return
-
-    total_reward = 0
-    for p in inventory:
-        base_reward = random.randint(20, 50)
-        boost = 1
-        for event in active_events:
-            boost *= event_boosts.get(event, 1)
-        reward = int(base_reward * boost)
-        total_reward += reward
-
-    economy[str(user.id)]["inventory"] = []
-    update_balance(user.id, total_reward)
-    await ctx.respond(f"🌾 You harvested all plants for **{total_reward} coins**!")
-
-# Mod-only commands
-@bot.slash_command(name="addcoins")
-@commands.has_role("Moderator")  # Replace with your Mod role name or ID
-async def addcoins(ctx, member: discord.Member, amount: int):
-    update_balance(member.id, amount)
-    await ctx.respond(f"✅ Added {amount} coins to {member.mention}.")
-
-@bot.slash_command(name="removecoins")
-@commands.has_role("Moderator")
-async def removecoins(ctx, member: discord.Member, amount: int):
-    update_balance(member.id, -amount)
-    await ctx.respond(f"✅ Removed {amount} coins from {member.mention}.")
-
-# Luck boost
-@bot.slash_command(name="luck")
-@commands.has_role("Moderator")
-async def luck(ctx, duration: int):
-    active_events["luck"] = duration * 60
-    await ctx.respond(f"🍀 Luck boost activated for {duration} minutes!")
-
-# Admin-only event spawn
-@bot.slash_command(name="spawnevent")
-@commands.has_role("Admin")  # Replace with your Admin role name or ID
-async def spawnevent(ctx, event: str):
-    if event not in event_boosts:
-        await ctx.respond("⚠️ Invalid event name!")
-        return
-    active_events[event] = 120  # Active for 2 minutes
-    await ctx.respond(f"⚡ Event **{event}** has been spawned!")
-
-# Automatic events
+# Tasks
 @tasks.loop(minutes=10)
-async def spawn_random_event():
-    event = random.choice(list(event_boosts.keys()))
-    active_events[event] = 120
-    print(f"🌟 Event {event} has started!")
+async def random_event():
+    global active_event
+    active_event["name"] = random.choice(list(events.keys()))
+    active_event["multiplier"] = events[active_event["name"]]
+    print(f"🌱 Event started: {active_event['name']} x{active_event['multiplier']}")
+    await asyncio.sleep(120)  # lasts 2 min
+    active_event = {"name": None, "multiplier": 1}
 
-@tasks.loop(seconds=60)
-async def update_events():
-    to_remove = []
-    for event in active_events:
-        active_events[event] -= 60
-        if active_events[event] <= 0:
-            to_remove.append(event)
-    for event in to_remove:
-        del active_events[event]
-        print(f"❌ Event {event} has ended.")
+@bot.event
+async def on_ready():
+    print(f"{bot.user} is online!")
+    random_event.start()
 
-# Start background tasks
-spawn_random_event.start()
-update_events.start()
+# Commands
+@bot.slash_command(description="Check your balance")
+async def balance(ctx):
+    user_id = str(ctx.author.id)
+    coins = economy.get(user_id, 0)
+    await ctx.respond(f"💰 You have {coins} coins.")
 
-# Start the bot
-keep_alive()
-bot.run("YOUR_BOT_TOKEN")
+@bot.slash_command(description="Claim daily coins")
+async def daily(ctx):
+    user_id = str(ctx.author.id)
+    economy[user_id] = economy.get(user_id, 0) + 100
+    save_economy()
+    await ctx.respond("🌱 You claimed your daily 100 coins!")
+
+@bot.slash_command(description="Plant a random flower")
+async def plant(ctx):
+    user_id = str(ctx.author.id)
+    if economy.get(user_id, 0) < 50:
+        await ctx.respond("❌ Not enough coins to plant! (50 coins)")
+        return
+    economy[user_id] -= 50
+    rarity_roll = random.random()
+    multiplier = active_event["multiplier"]
+    found_plant = None
+    for plant, chance in plants.items():
+        if rarity_roll <= chance * multiplier:
+            found_plant = plant
+            break
+    if not found_plant:
+        found_plant = "Weeds 😅"
+    save_economy()
+    await ctx.respond(f"🌸 You planted and grew: **{found_plant}**!")
+
+@bot.slash_command(description="Harvest for random coins")
+async def harvest(ctx):
+    user_id = str(ctx.author.id)
+    reward = random.randint(50, 150) * active_event["multiplier"]
+    economy[user_id] = economy.get(user_id, 0) + int(reward)
+    save_economy()
+    await ctx.respond(f"🌾 You harvested and earned **{int(reward)} coins**!")
+
+@bot.slash_command(description="Give coins to a user (Mods only)")
+@has_permissions(manage_guild=True)
+async def addcoins(ctx, member: discord.Member, amount: int):
+    user_id = str(member.id)
+    economy[user_id] = economy.get(user_id, 0) + amount
+    save_economy()
+    await ctx.respond(f"✅ Gave {amount} coins to {member.mention}")
+
+@bot.slash_command(description="Remove coins from a user (Mods only)")
+@has_permissions(manage_guild=True)
+async def removecoins(ctx, member: discord.Member, amount: int):
+    user_id = str(member.id)
+    economy[user_id] = max(0, economy.get(user_id, 0) - amount)
+    save_economy()
+    await ctx.respond(f"✅ Removed {amount} coins from {member.mention}")
+
+@bot.slash_command(description="Spawn a special event (Admins only)")
+@has_permissions(administrator=True)
+async def spawnevent(ctx, event_name: str):
+    global active_event
+    if event_name in events:
+        active_event["name"] = event_name
+        active_event["multiplier"] = events[event_name]
+        await ctx.respond(f"🎉 Event **{event_name}** started! x{events[event_name]}")
+    else:
+        await ctx.respond("❌ Event not found.")
+
+# Run bot
+bot.run(os.environ["TOKEN"])
