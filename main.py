@@ -1,199 +1,129 @@
 import discord
-from discord.ext import commands
-from discord import app_commands
+from discord.ext import commands, tasks
 import random
-import os
-from flask import Flask
-from threading import Thread
-from datetime import datetime, timedelta
+import asyncio
+import datetime
 
-# Flask keep-alive
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "🌱 The Garden Bot is alive with RARITIES & LUCK BOOST!"
-
-def run():
-    app.run(host="0.0.0.0", port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# Bot setup
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
+bot = commands.Bot(command_prefix="/", intents=intents)
 
-# Data storage
+# Economy data
 user_balances = {}
-user_gardens = {}
-user_daily_timers = {}
-server_luck = {}
+user_plants = {}
+current_event = {"name": None, "multiplier": 1, "end_time": None}
+luck_boost = {"active": False, "multiplier": 1, "end_time": None}
 
-def get_balance(user_id):
-    return user_balances.get(user_id, 0)
-
-def update_balance(user_id, amount):
-    user_balances[user_id] = get_balance(user_id) + amount
-
-def get_garden(user_id):
-    return user_gardens.get(user_id, {"plants": [], "watered": False})
-
-def update_garden(user_id, plants=None, watered=None):
-    garden = get_garden(user_id)
-    if plants is not None:
-        garden["plants"] = plants
-    if watered is not None:
-        garden["watered"] = watered
-    user_gardens[user_id] = garden
-
-def get_luck(guild_id):
-    return server_luck.get(guild_id, {"active": False, "ends_at": None})
-
-def set_luck(guild_id, active, duration_minutes=0):
-    ends_at = datetime.utcnow() + timedelta(minutes=duration_minutes) if active else None
-    server_luck[guild_id] = {"active": active, "ends_at": ends_at}
-
-# Events
-@bot.event
-async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
-    try:
-        synced = await tree.sync()
-        print(f"🌐 Synced {len(synced)} slash commands")
-    except Exception as e:
-        print(f"Error syncing commands: {e}")
-
-# Economy Commands
-@tree.command(name="balance", description="Check your coin balance 🌱")
-async def balance(interaction: discord.Interaction):
-    coins = get_balance(interaction.user.id)
-    await interaction.response.send_message(f"💰 {interaction.user.mention}, you have **{coins} coins**.")
-
-@tree.command(name="daily", description="Claim your daily coins 🌞")
-async def daily(interaction: discord.Interaction):
-    now = datetime.utcnow()
-    user_id = interaction.user.id
-
-    if user_id in user_daily_timers:
-        next_claim_time = user_daily_timers[user_id]
-        if now < next_claim_time:
-            remaining = next_claim_time - now
-            hours, remainder = divmod(int(remaining.total_seconds()), 3600)
-            minutes, _ = divmod(remainder, 60)
-            await interaction.response.send_message(
-                f"⏳ You already claimed your daily! Come back in {hours}h {minutes}m.",
-                ephemeral=True
-            )
-            return
-
-    update_balance(user_id, 100)
-    user_daily_timers[user_id] = now + timedelta(hours=24)
-    await interaction.response.send_message(
-        f"✅ {interaction.user.mention}, you claimed **100 daily coins**! Come back tomorrow 🌞"
-    )
-
-@tree.command(name="beg", description="Beg for coins 💸")
-async def beg(interaction: discord.Interaction):
-    reward = random.randint(5, 15)
-    update_balance(interaction.user.id, reward)
-    await interaction.response.send_message(f"🪙 {interaction.user.mention}, someone gave you **{reward} coins**!")
-
-# Mods only
-@tree.command(name="addcoins", description="Mods only: Add coins to a user")
-@app_commands.describe(user="User to add coins to", amount="Amount of coins")
-async def addcoins(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if 1389121338123485224 in [role.id for role in interaction.user.roles]:
-        update_balance(user.id, amount)
-        await interaction.response.send_message(f"✅ Added **{amount} coins** to {user.mention}")
-    else:
-        await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
-
-@tree.command(name="removecoins", description="Mods only: Remove coins from a user")
-@app_commands.describe(user="User to remove coins from", amount="Amount of coins")
-async def removecoins(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if 1389121338123485224 in [role.id for role in interaction.user.roles]:
-        update_balance(user.id, -amount)
-        await interaction.response.send_message(f"✅ Removed **{amount} coins** from {user.mention}")
-    else:
-        await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
-
-# Luck Command
-@tree.command(name="luck", description="Mods only: Activate server luck boost 🍀")
-@app_commands.describe(duration="Minutes of luck boost")
-async def luck(interaction: discord.Interaction, duration: int):
-    if 1389121338123485224 in [role.id for role in interaction.user.roles]:
-        set_luck(interaction.guild.id, True, duration)
-        await interaction.response.send_message(f"🍀 Server-wide luck boost activated for **{duration} minutes**!")
-    else:
-        await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
-
-# Garden Commands
-RARITY_TABLE = [
-    ("🌻 Sunflower", 7),
-    ("🌹 Rose", 23),
-    ("🍀 Clover", 50),
-    ("🪴 Common Plant", 100)
+# Events data
+events = [
+    {"name": "Thunderstorm", "multiplier": 100},
+    {"name": "Wet", "multiplier": 2},
+    {"name": "Heatwave", "multiplier": 0.5},
+    {"name": "Rainbow", "multiplier": 10},
+    {"name": "Butterfly Swarm", "multiplier": 3},
+    {"name": "Bee Attack", "multiplier": 0.8},
+    {"name": "Snowstorm", "multiplier": 1.2},
+    {"name": "Wildfire", "multiplier": 0.3},
+    {"name": "Bloom", "multiplier": 5},
+    {"name": "Mushroom Growth", "multiplier": 4}
 ]
 
-def pick_plant(guild_id):
-    luck = get_luck(guild_id)
-    multiplier = 2 if luck["active"] and datetime.utcnow() < luck["ends_at"] else 1
-    roll = random.uniform(0, 100)
-    for plant, chance in RARITY_TABLE:
-        if roll <= chance * multiplier:
-            return plant
-        roll -= chance
-    return "🪴 Common Plant"
+admin_only_events = [
+    {"name": "DJ Jhai", "multiplier": 1000},
+    {"name": "Disco", "multiplier": 500}
+]
 
-@tree.command(name="plant", description="Plant a seed 🌱 (costs 50 coins)")
-async def plant(interaction: discord.Interaction):
-    if get_balance(interaction.user.id) < 50:
-        await interaction.response.send_message("❌ Not enough coins! (50 required)")
-        return
-    update_balance(interaction.user.id, -50)
-    new_plant = pick_plant(interaction.guild.id)
-    garden = get_garden(interaction.user.id)
-    garden["plants"].append(new_plant)
-    update_garden(interaction.user.id, plants=garden["plants"])
-    await interaction.response.send_message(f"🌱 You planted a seed and got **{new_plant}**!")
+plant_rarity = [
+    {"name": "Sunflower", "chance": 7, "coins": 200},
+    {"name": "Rose", "chance": 23, "coins": 150},
+    {"name": "Tulip", "chance": 30, "coins": 100},
+    {"name": "Daisy", "chance": 40, "coins": 50}
+]
 
-@tree.command(name="water", description="Water your garden 💦")
-async def water(interaction: discord.Interaction):
-    garden = get_garden(interaction.user.id)
-    if not garden["plants"]:
-        await interaction.response.send_message("❌ You have no plants to water!")
-        return
-    if garden["watered"]:
-        await interaction.response.send_message("💧 Your plants are already watered.")
-        return
-    update_garden(interaction.user.id, watered=True)
-    await interaction.response.send_message("💦 You watered your garden! Next harvest will give a bonus.")
+# Auto event spawner
+@tasks.loop(minutes=10)
+async def spawn_event():
+    event = random.choice(events)
+    current_event.update({
+        "name": event["name"],
+        "multiplier": event["multiplier"],
+        "end_time": datetime.datetime.utcnow() + datetime.timedelta(minutes=2)
+    })
+    print(f"🌱 Event started: {event['name']} x{event['multiplier']} for 2 minutes")
+    await asyncio.sleep(120)
+    current_event.update({"name": None, "multiplier": 1, "end_time": None})
+    print("🌱 Event ended")
 
-@tree.command(name="harvest", description="Harvest your plants 🍃 for coins")
-async def harvest(interaction: discord.Interaction):
-    garden = get_garden(interaction.user.id)
-    if not garden["plants"]:
-        await interaction.response.send_message("❌ You have no plants to harvest.")
-        return
-    total_reward = 0
-    for plant in garden["plants"]:
-        base = random.randint(20, 50)
-        total_reward += base
-    bonus = total_reward * 0.5 if garden["watered"] else 0
-    total_reward = int(total_reward + bonus)
-    update_balance(interaction.user.id, total_reward)
-    update_garden(interaction.user.id, plants=[], watered=False)
-    await interaction.response.send_message(
-        f"🍃 You harvested your garden for **{total_reward} coins**!\n(Bonus applied: {bonus > 0})"
-    )
+@bot.event
+async def on_ready():
+    print(f"{bot.user} is online!")
+    spawn_event.start()
 
-# Start bot
-keep_alive()
-bot.run(os.environ['TOKEN'])
+# Economy commands
+@bot.slash_command(name="balance")
+async def balance(ctx):
+    coins = user_balances.get(ctx.author.id, 0)
+    await ctx.respond(f"💰 You have {coins} coins.")
+
+@bot.slash_command(name="plant")
+async def plant(ctx):
+    multiplier = current_event["multiplier"] * (luck_boost["multiplier"] if luck_boost["active"] else 1)
+    rng = random.randint(1, 100)
+    plant_got = None
+    for plant in plant_rarity:
+        if rng <= plant["chance"]:
+            plant_got = plant
+            break
+    if not plant_got:
+        plant_got = {"name": "Weed", "coins": 10}  # fallback
+
+    reward = int(plant_got["coins"] * multiplier)
+    user_balances[ctx.author.id] = user_balances.get(ctx.author.id, 0) + reward
+    await ctx.respond(f"🌱 You planted and grew a **{plant_got['name']}** worth {reward} coins! (Event: {current_event['name'] or 'None'})")
+
+@bot.slash_command(name="harvest")
+async def harvest(ctx):
+    multiplier = current_event["multiplier"] * (luck_boost["multiplier"] if luck_boost["active"] else 1)
+    reward = int(random.randint(50, 200) * multiplier)
+    user_balances[ctx.author.id] = user_balances.get(ctx.author.id, 0) + reward
+    await ctx.respond(f"🌾 You harvested crops and earned {reward} coins! (Event: {current_event['name'] or 'None'})")
+
+@bot.slash_command(name="luck")
+@commands.has_permissions(administrator=True)
+async def luck(ctx, minutes: int = 5):
+    luck_boost.update({
+        "active": True,
+        "multiplier": 2,
+        "end_time": datetime.datetime.utcnow() + datetime.timedelta(minutes=minutes)
+    })
+    await ctx.respond(f"🍀 Luck boost activated! All rewards x2 for {minutes} minutes.")
+    await asyncio.sleep(minutes * 60)
+    luck_boost.update({"active": False, "multiplier": 1, "end_time": None})
+    await ctx.send("🍀 Luck boost has ended.")
+
+@bot.slash_command(name="spawnevent")
+@commands.has_permissions(administrator=True)
+async def spawnevent(ctx, event_name: str):
+    match = next((e for e in admin_only_events if e["name"].lower() == event_name.lower()), None)
+    if match:
+        current_event.update({
+            "name": match["name"],
+            "multiplier": match["multiplier"],
+            "end_time": datetime.datetime.utcnow() + datetime.timedelta(minutes=2)
+        })
+        await ctx.respond(f"🎉 Admin spawned event: {match['name']} x{match['multiplier']} for 2 minutes!")
+    else:
+        await ctx.respond("❌ Event not found or not admin-only.")
+
+@bot.slash_command(name="currentevent")
+async def currentevent(ctx):
+    if current_event["name"]:
+        time_left = (current_event["end_time"] - datetime.datetime.utcnow()).seconds
+        await ctx.respond(f"🌟 Current Event: {current_event['name']} x{current_event['multiplier']} (ends in {time_left}s)")
+    else:
+        await ctx.respond("🌿 No event active.")
+
+bot.run("YOUR_BOT_TOKEN")
