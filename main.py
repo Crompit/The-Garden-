@@ -1,14 +1,15 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import json, random, asyncio
+import json, random, asyncio, os
 from flask import Flask
 from threading import Thread
 
-TOKEN = "YOUR_BOT_TOKEN"  # Replace with your token
-MOD_ROLE_ID = 123456789012345678  # Replace with your mod role ID
-ADMIN_ROLE_ID = 987654321098765432  # Replace with your admin role ID
-CONFESS_CHANNEL_ID = 123456789012345678  # Replace with your confession channel ID
+# Get token from Render environment
+TOKEN = os.getenv("TOKEN")
+MOD_ROLE_ID = 1389121338123485224  # Replace with mod role ID
+ADMIN_ROLE_ID = 1389121338123485224  # Replace with admin role ID
+CONFESS_CHANNEL_ID = 123456789012345678  # Replace with confession channel ID
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -53,130 +54,66 @@ active_event = {"name": None, "multiplier": 1}
 app = Flask('')
 @app.route('/')
 def home():
-    return "The Garden Bot is alive!"
+    return "🌱 The Garden Bot is alive!"
 def run():
     app.run(host='0.0.0.0', port=8080)
 def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# ✅ /balance
+# 🪙 Economy commands
 @tree.command(name="balance", description="Check your coin balance")
 async def balance(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
     coins = data["coins"].get(user_id, 0)
-    await interaction.response.send_message(f"💰 {interaction.user.mention} you have **{coins} coins**.")
+    await interaction.response.send_message(f"💰 You have {coins} coins.", ephemeral=True)
 
-# ✅ /daily
-@tree.command(name="daily", description="Claim your daily reward")
+@tree.command(name="daily", description="Claim your daily coins")
 async def daily(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
-    if "last_daily" not in data:
-        data["last_daily"] = {}
-    last = data["last_daily"].get(user_id, 0)
-    now = discord.utils.utcnow().timestamp()
-    if now - last < 86400:
-        await interaction.response.send_message("⏳ You already claimed daily today. Try again later!")
-    else:
-        reward = random.randint(100, 300)
-        reward *= active_event["multiplier"]
-        data["coins"][user_id] = data["coins"].get(user_id, 0) + reward
-        data["last_daily"][user_id] = now
-        save_data()
-        await interaction.response.send_message(f"🎁 You claimed your daily and got **{reward} coins**!")
-
-# ✅ /addcoins (mods only)
-@tree.command(name="addcoins", description="Add coins to a user (mods only)")
-@app_commands.describe(member="User to add coins to", amount="Amount of coins")
-@app_commands.checks.has_role(MOD_ROLE_ID)
-async def addcoins(interaction: discord.Interaction, member: discord.Member, amount: int):
-    user_id = str(member.id)
-    data["coins"][user_id] = data["coins"].get(user_id, 0) + amount
+    reward = random.randint(50, 100) * active_event["multiplier"]
+    data["coins"][user_id] = data["coins"].get(user_id, 0) + reward
     save_data()
-    await interaction.response.send_message(f"✅ Added {amount} coins to {member.mention}.")
+    await interaction.response.send_message(f"🌞 Daily reward: {reward} coins! Event Boost: x{active_event['multiplier']}")
 
-# ✅ /removecoins (mods only)
-@tree.command(name="removecoins", description="Remove coins from a user (mods only)")
-@app_commands.describe(member="User to remove coins from", amount="Amount of coins")
-@app_commands.checks.has_role(MOD_ROLE_ID)
-async def removecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
-    user_id = str(member.id)
-    data["coins"][user_id] = max(data["coins"].get(user_id, 0) - amount, 0)
-    save_data()
-    await interaction.response.send_message(f"❌ Removed {amount} coins from {member.mention}.")
-
-# 🌱 /plant
+# 🌱 Planting & harvesting
 @tree.command(name="plant", description="Plant a random seed")
 async def plant(interaction: discord.Interaction):
-    chance = random.randint(1, 100)
-    reward_plant = None
-    for p in plants:
-        if chance <= p["chance"]:
-            reward_plant = p
-            break
-    if reward_plant:
-        item = reward_plant["name"]
-        data["inventory"].setdefault(str(interaction.user.id), []).append(item)
-        save_data()
-        await interaction.response.send_message(f"🌱 You planted and got a **{item}**!")
-    else:
-        await interaction.response.send_message("😢 Nothing grew this time.")
+    user_id = str(interaction.user.id)
+    choice = random.choices(plants, weights=[p['chance'] for p in plants], k=1)[0]
+    name = choice['name']
+    data["inventory"].setdefault(user_id, []).append(name)
+    save_data()
+    await interaction.response.send_message(f"🌱 You planted a **{name}**!")
 
-# 🌾 /harvest
 @tree.command(name="harvest", description="Harvest your plants for coins")
 async def harvest(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
-    inventory = data["inventory"].get(user_id, [])
-    if not inventory:
-        await interaction.response.send_message("🌾 You don’t have any plants to harvest.")
+    plants_owned = data["inventory"].get(user_id, [])
+    if not plants_owned:
+        await interaction.response.send_message("❌ You have no plants to harvest.")
         return
-    total = 0
-    for plant_name in inventory:
-        for p in plants:
-            if p["name"] == plant_name:
-                reward = random.randint(*p["reward"])
-                total += reward
-                break
-    total *= active_event["multiplier"]
-    data["coins"][user_id] = data["coins"].get(user_id, 0) + total
+    total_reward = sum(random.randint(*next(p['reward'] for p in plants if p['name'] == plant)) for plant in plants_owned)
+    total_reward *= active_event["multiplier"]
+    data["coins"][user_id] += total_reward
     data["inventory"][user_id] = []
     save_data()
-    await interaction.response.send_message(f"🌾 You harvested and earned **{total} coins**!")
+    await interaction.response.send_message(f"🌾 You harvested your garden and earned **{total_reward} coins**!")
 
-# 🌩 /spawnevent (admins only)
-@tree.command(name="spawnevent", description="Admins can spawn special weather events")
-@app_commands.describe(event_name="The name of the event")
-@app_commands.choices(event_name=[app_commands.Choice(name=k, value=k) for k in events])
-@app_commands.checks.has_role(ADMIN_ROLE_ID)
-async def spawnevent(interaction: discord.Interaction, event_name: str):
-    active_event["name"] = event_name
-    active_event["multiplier"] = events[event_name]
-    await interaction.response.send_message(f"🌟 Event **{event_name}** activated! Multiplier: x{events[event_name]}")
-    await asyncio.sleep(120)
-    active_event["name"] = None
-    active_event["multiplier"] = 1
-    await interaction.followup.send(f"⏳ Event **{event_name}** has ended.")
-
-# Auto events every 10 mins
-@tasks.loop(minutes=10)
-async def auto_event():
-    if random.randint(1, 10) <= 3:  # 30% chance to trigger
-        event_name = random.choice(list(events.keys()))
+# 🌩️ Admin-only spawn events
+@tree.command(name="spawn_event", description="Spawn a weather event (admin only)")
+@app_commands.describe(event_name="Name of the event")
+async def spawn_event(interaction: discord.Interaction, event_name: str):
+    if not any(role.id == ADMIN_ROLE_ID for role in interaction.user.roles):
+        await interaction.response.send_message("❌ You don't have permission.", ephemeral=True)
+        return
+    if event_name in events:
         active_event["name"] = event_name
         active_event["multiplier"] = events[event_name]
-        channel = bot.get_channel(CONFESS_CHANNEL_ID)
-        await channel.send(f"⚡ Event **{event_name}** started! x{events[event_name]} multiplier for 2 mins!")
-        await asyncio.sleep(120)
-        active_event["name"] = None
-        active_event["multiplier"] = 1
-        await channel.send(f"⏳ Event **{event_name}** ended.")
+        await interaction.response.send_message(f"⚡ Admin spawned **{event_name}** (x{events[event_name]} boost)!")
+    else:
+        await interaction.response.send_message("❌ Unknown event name.", ephemeral=True)
 
-@bot.event
-async def on_ready():
-    await tree.sync()
-    auto_event.start()
-    print(f"✅ Logged in as {bot.user}")
-
-# Keep-alive for Render
+# 🌐 Start Flask + bot
 keep_alive()
 bot.run(TOKEN)
